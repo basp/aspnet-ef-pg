@@ -11,8 +11,6 @@ public class SimulatedConnectionFaultInterceptor : DbConnectionInterceptor
     public SimulatedConnectionFaultInterceptor(
         ILogger<SimulatedConnectionFaultInterceptor> logger)
     {
-        // TODO: Simulate 08001
-        
         this.logger = logger;
     }
     public override ValueTask<InterceptionResult> ConnectionOpeningAsync(

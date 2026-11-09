@@ -59,9 +59,11 @@ out of the box.
    docker run --name some-postgres -e POSTGRES_PASSWORD=foo -p 5432:5432 -d postgres
    ```
 
-   Note: there are no migrations in this repo — the `Items` table must exist
-   (e.g. created once via a prior session or `EnsureCreated`) for `/items`
-   to work; `/health` only needs a reachable database.
+   The schema is captured by an `InitialCreate` migration in
+   `Host/Migrations/`, but the app does not apply migrations at startup —
+   run `dotnet ef database update --project Host` once, or make sure the
+   `Items` table already exists (e.g. from a prior session). `/health` only
+   needs a reachable database.
 2. `dotnet run --project Host` → `http://localhost:5264`.
 3. Endpoints:
 
@@ -106,10 +108,16 @@ Open questions answered so far: [`QUESTIONS.md`](QUESTIONS.md).
 
 ## Status
 
-- OpenSpec is initialized; a single capability spec about health checks ×
-  connection resiliency is planned (manual verification only — automated
-  tests become relevant if this idea is incorporated into a real codebase).
+- OpenSpec is set up and the first capability spec is captured: see
+  [`openspec/specs/ef-connection-resiliency/spec.md`](openspec/specs/ef-connection-resiliency/spec.md),
+  applied and archived as the change `add-ef-connection-resiliency-spec`
+  on 2026-11-10 (manual verification only — automated tests become relevant
+  if this idea is incorporated into a real codebase).
 - Candidate improvements are captured but deliberately not implemented yet:
-  make fault injection reachable on the health-check probe and write paths,
-  README/demo cleanup (vestigial TODO comment, unused SQLite package
-  reference), and parameterizing the fault rate.
+  make fault injection reachable on the health-check probe (adding a
+  `NonQueryExecutingAsync` override would require a spec delta, since the
+  current spec pins the probe path to connection-level faults by construct),
+  and parameterizing the fault rate and retry settings.
+- Framework version pairing: the host targets `net11.0` (RC SDK) while the
+  EF Core and Npgsql provider packages are 10.x stable; noted here as the
+  current representative pairing (see [`QUESTIONS.md`](QUESTIONS.md)).

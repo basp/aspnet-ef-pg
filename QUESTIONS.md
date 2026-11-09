@@ -51,12 +51,17 @@ requirement or spec commitment yet.
 
 ## Smaller threads
 
-4. **Framework version pairing.** The host targets `net11.0` (RC SDK) while
+4. **Framework version pairing.** ~~The host targets `net11.0` (RC SDK) while
    EF Core and Npgsql provider packages are 10.x stable. Intentional
-   representative pairing, or accidental versioning worth a README comment?
+   representative pairing, or accidental versioning worth a README comment?~~
+   **Resolved 2026-11-10**: the pairing is now noted in the README status
+   section.
 5. **Fate of `TAKEAWAYS.md`.** Currently a root-level scratch capture.
    Candidates: keep as repo readme-adjacent notes, fold the evidence into
    the OpenSpec change's design rationale, or drop once the spec exists.
-6. **Spec id naming.** Depends on scope kept as one spec; something like
+6. **Spec id naming.** ~~Depends on scope kept as one spec; something like
    `ef-retry-on-failure` vs `health-check-resiliency` vs a combined id
-   still to be chosen when the change is captured.
+   still to be chosen when the change is captured.~~
+   **Resolved 2026-11-10**: one capability spec was captured and archived as
+   `ef-connection-resiliency` (change `add-ef-connection-resiliency-spec`,
+   applied and archived 2026-11-10).
