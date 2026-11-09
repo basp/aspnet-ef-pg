@@ -21,21 +21,21 @@ public class SimulatedTransientErrorInterceptor : DbCommandInterceptor
         CancellationToken cancellationToken = new())
     {
         var roll = Random.Shared.Next(100);
-        if (roll > 30)
+        if (roll < 30)
         {
-            this.logger.LogDebug("Simulating transient error.");
-
-            throw new PostgresException(
-                "Simulated database failover.",
-                "FATAL",
-                "FATAL",
-                "57P01");
+            // Nothing happens - just pass through.
+            return base.ReaderExecutingAsync(
+                command, 
+                eventData, 
+                result, 
+                cancellationToken);
         }
         
-        return base.ReaderExecutingAsync(
-            command, 
-            eventData, 
-            result, 
-            cancellationToken);
+        this.logger.LogDebug("Simulating transient error.");
+        throw new PostgresException(
+            "Simulated database failover.",
+            "FATAL",
+            "FATAL",
+            "57P01");
     }
 }

@@ -26,8 +26,8 @@ builder
             pg =>
             {
                 pg.EnableRetryOnFailure(
-                    maxRetryCount: 3,
-                    maxRetryDelay: TimeSpan.FromSeconds(10),
+                    maxRetryCount: 10,
+                    maxRetryDelay: TimeSpan.FromSeconds(30),
                     errorCodesToAdd: null);
             });
         
