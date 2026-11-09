@@ -54,6 +54,10 @@ bld/
 #!**/[Bb]in/*.refresh
 
 .idea/
+.agents/
+.junie/
+.github/
+.opencode/
 
 # Visual Studio 2015/2017 cache/options directory
 .vs/
