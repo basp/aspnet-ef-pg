@@ -1,0 +1,90 @@
+# TAKEAWAYS
+
+Notes from a guided run-through of the `EnableRetryOnFailure` + health-check
+demonstration (2026-11-09). Evidence comes from log analysis of a single
+session; treat measured numbers as observations (n=1), not contract.
+
+## What the demo is for
+
+Demonstrate that `EnableRetryOnFailure` on the Npgsql EF provider
+(`Npgsql.EntityFrameworkCore.PostgreSQL`) also applies to the Entity Framework
+`DbContext` health check registered via `AddDbContextCheck`.
+
+Configuration (Host/Program.cs):
+
+- `pg.EnableRetryOnFailure(maxRetryCount: 10, maxRetryDelay: 30s)`
+- Fault injection via two scoped interceptors, 50% chance each attempt:
+  - `SimulatedConnectionFaultInterceptor` (`ConnectionOpeningAsync`)
+    throws `PostgresException` 08001 ("connection could not be established").
+  - `SimulatedTransientErrorInterceptor` (`ReaderExecutingAsync`)
+    throws `PostgresException` 57P01 (`admin_shutdown`, simulated failover).
+- `/health` registers `AddDbContextCheck<FooContext>` (custom test query:
+  `CanConnectAsync`) plus a trivial always-healthy `FooHealthCheck` baseline.
+- `/items` and `POST /items` exercise the ordinary query/command path.
+
+## Verified observations
+
+1. **Thesis holds.** `/health` returned `Healthy` 21/21 while the connection
+   interceptor faulted ~50% of connection attempts. Log evidence shows the
+   `NpgsqlRetryingExecutionStrategy` wrapping the health-check probe
+   (`CanConnectAsync` -> `NpgsqlDatabaseCreator.ExistsAsync`):
+   fault (08001) -> "A transient exception occurred. The operation will be
+   retried after Xms." -> re-open -> check completes healthy.
+2. **Probe path subtlety.** The health-check probe executes `SELECT 1` as
+   `ExecuteNonQuery`. `SimulatedTransientErrorInterceptor` only overrides
+   `ReaderExecutingAsync`, so 57P01 command faults NEVER occur on the
+   `/health` path; only 08001 connection faults are exercised there.
+3. **Table setup.** No migrations exist in this repo; the `Items` table was
+   present from a prior session. `CanConnectAsync` works against any
+   reachable database, so `/health` is unaffected; `/items` would return a
+   non-transient 42P01 ("relation does not exist") if the table were missing
+   and would NOT be retried.
+4. **Retry budget vs client patience.** Retry delay ladder is exponential
+   with 0ms first delay, doubling, capped at `maxRetryDelay`:
+   0, 1, 2, 4, 8, 16, 30, 30, 30... seconds. Total budget for 10 retries is
+   ~121s. Three unlucky requests each exhausted all 10 retries, and
+   `RetryLimitExceededException` surfaced as a 500 after ~2 minutes. A
+   client's HttpClient timeout (120s in the test loop) expires first, so the
+   caller sees a timeout while the server continues retrying in the
+   background — cancellation of the HTTP request does not cancel the EF
+   retry ladder, which outlives it by seconds-to-minutes.
+5. **Timing stats (single session).** 21 health checks: average ~184ms,
+   max ~1067ms under sustained fault injection. Session totals: 57 retry
+   events logged, 85 connection faults (08001), 64 command faults (57P01),
+   3 retry-budget exhaustions (one such exception gets logged 3x by
+   different loggers, so log-line counts are not request counts).
+
+## Candidate take-aways / open threads
+
+- **Spec capture (next).** The demo's intent and observed behaviors exist
+  only in code, README, and this session; no OpenSpec specs or changes are
+  captured yet. An initial capability spec should scope strictly to what the
+  demo *as built* demonstrates; run numbers (184ms etc.) are artifacts of a
+  single session and must not become requirements.
+- **Demo improvement candidate.** The health-check probe path only exercises
+  connection-level faults. Adding a `NonQueryExecutingAsync` override to
+  `SimulatedTransientErrorInterceptor` would let the 57P01 fault reach the
+  `AddDbContextCheck` probe, making the demo fully symmetric.
+- **Doc/cleanup candidates.**
+  - `SimulatedConnectionFaultInterceptor.cs` has a vestigial
+    `// TODO: Simulate 08001` comment (the code already does this).
+  - `Host.csproj` references `Microsoft.EntityFrameworkCore.Sqlite`, which
+    is unused.
+  - README does not state the demo's point; worth a paragraph.
+- **Config knob idea.** Fault rate (50%) and retry settings are hardcoded;
+  parameterizing them would make the demo easier to reason about and safer
+  to run repeatedly.
+
+## Session end state (2026-11-10)
+
+- Demo app stopped after the run-through (killed `dotnet run`/`Host.exe`).
+- `some-postgres` Docker container still running on `localhost:5432`,
+  credentials matching `appsettings.Development.json`; `Items` table intact,
+  so the demo can be relaunched and re-verified without setup.
+- Statistical caveat for the spec: at a 50% fault rate, retry-budget
+  exhaustion occurred 3 of ~40 observed requests — far above the naive
+  ~1-in-2000 odds. Likely explanation is correlated attempts rather than
+  truly independent rolls; do NOT bake the observed rate into any
+  requirement, but do record that exhaustion is possible under sustained
+  fault injection and how it manifests (about 2 minutes of silent stall
+  before a 500 response).
