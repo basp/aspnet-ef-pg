@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Example - API Documentation</title>
+    <style>
+        body { margin: 0; padding: 0; }
+        #opencollection-container { width: 100vw; height: 100vh; }
+    </style>
+    <link rel="stylesheet" href="https://cdn.usebruno.com/api-docs/api-docs.css">
+    <script src="https://cdn.usebruno.com/api-docs/api-docs.js"></script>
+</head>
+<body>
+    <div id="opencollection-container"></div>
+    <script>
+        const collectionData = "opencollection: 1.0.0\ninfo:\n  name: Example\nconfig:\n  proxy:\n    inherit: true\n    config:\n      protocol: http\n      hostname: ''\n      port: ''\n      auth:\n        username: ''\n        password: ''\n      bypassProxy: ''\nitems:\n  - info:\n      name: index\n      type: http\n      seq: 1\n    http:\n      method: GET\n      url: http://localhost:5264/\n      auth: inherit\n    settings:\n      encodeUrl: true\n      timeout: 0\n      followRedirects: true\n      maxRedirects: 5\n      forwardAuthorizationHeader: false\n  - info:\n      name: health\n      type: http\n      seq: 1\n    http:\n      method: GET\n      url: http://localhost:5264/health\n      auth: inherit\n    settings:\n      encodeUrl: true\n      timeout: 0\n      followRedirects: true\n      maxRedirects: 5\n      forwardAuthorizationHeader: false\n  - info:\n      name: items\n      type: http\n      seq: 1\n    http:\n      method: GET\n      url: http://localhost:5264/items\n      auth: inherit\n    settings:\n      encodeUrl: true\n      timeout: 0\n      followRedirects: true\n      maxRedirects: 5\n      forwardAuthorizationHeader: false\n  - info:\n      name: items\n      type: http\n      seq: 1\n    http:\n      method: POST\n      url: http://localhost:5264/items\n      body:\n        type: json\n        data: |-\n          {\n            \"Name\": \"quux-3\",\n            \"Description\": \"Yet another quux.\"\n          }\n      auth: inherit\n    settings:\n      encodeUrl: true\n      timeout: 0\n      followRedirects: true\n      maxRedirects: 5\n      forwardAuthorizationHeader: false\nbundled: true\nextensions:\n  bruno:\n    ignore:\n      - node_modules\n      - .git\n    exportedAt: '2026-11-09T20:35:29.169Z'\n    exportedUsing: Bruno/4.3.0\n";
+        new window.OpenCollection({
+            target: document.getElementById('opencollection-container'),
+            opencollection: collectionData,
+            theme: 'light'
+        });
+    </script>
+</body>
+</html>
