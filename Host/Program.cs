@@ -26,7 +26,7 @@ builder
             pg =>
             {
                 pg.EnableRetryOnFailure(
-                    maxRetryCount: 10,
+                    maxRetryCount: 3,
                     maxRetryDelay: TimeSpan.FromSeconds(30),
                     errorCodesToAdd: null);
             });
@@ -37,7 +37,9 @@ builder
 builder
     .Services
     .AddHealthChecks()
-    .AddDbContextCheck<FooContext>()
+    .AddDbContextCheck<FooContext>(
+        customTestQuery: (context, token) => 
+            context.Database.CanConnectAsync(token))
     .AddCheck<FooHealthCheck>("foo");
 
 var app = builder
