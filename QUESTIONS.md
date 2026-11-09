@@ -19,29 +19,35 @@ requirement or spec commitment yet.
 
 ## Unverified behaviors (cheap experiments, worth doing before/during spec formalization)
 
-1. **Health check hard-down behavior — never observed.** The session showed
-   `/health` surviving transient connection faults (08001) and `/items`
-   failing with `RetryLimitExceededException`, but not what happens when the
-   database is *persistently* unreachable (e.g. stop the `some-postgres`
-   container): expected result is a ~121s stall then an `Unhealthy` check
-   result, but this is unconfirmed on the health-check path. This is
-   arguably the most operationally interesting behavior for the thesis.
-2. **Write path — never exercised.** `POST /items` (`SaveChangesAsync`) was
-   not run at all. Two sub-questions:
-   - Interceptor coverage: fault injection likely cannot reach writes
-     either, since `SimulatedTransientErrorInterceptor` only overrides
-     `ReaderExecutingAsync` and writes go through `ExecuteNonQuery` /
-     `ExecuteScalar` (only 08001 connection faults could apply).
-   - Retry semantics for writes: `EnableRetryOnFailure` retrying
-     non-idempotent operations has the known "commit succeeded but caller
-     lost the connection" verification problem. Whether the demo should
-     demonstrate (or caveat) write-path resiliency is unresolved.
-   Verifying would show whether the demo's claim ("resiliency works") is
-   complete or reader-only.
-3. **Is the `customTestQuery` lambda redundant?** The default test query for
-   `AddDbContextCheck` is `CanConnectAsync` already, so the explicit lambda
-   in `Program.cs` may be decorative. Five-minute code check; tighten demo
-   code either way (keep for explicitness or remove as noise).
+1. **Health check hard-down behavior — never observed.** ~~Expected result is
+   a ~121s stall then an `Unhealthy` check result, but this is unconfirmed on
+   the health-check path.~~
+   **Resolved 2026-11-10** (second-session experiment, `docker stop
+   some-postgres`): `/health` returned HTTP **503 Unhealthy** after
+   **~194s** — 10 escalating retries with delays capped at 30s plus ~7s per
+   failed connection attempt, then `RetryLimitExceededException` swallowed
+   by the health-check service into an `Unhealthy` result (message
+   `(null)`). Notably the retry-limit-exceeded failure is NOT logged on the
+   health-check path (unlike ordinary requests); the retry warnings are the
+   only log trail. Recorded in the delta spec as a scenario under the
+   health-check requirement. Recovery after `docker start` was immediate.
+2. **Write path — never exercised.** ~~Two sub-questions hang there:~~
+   **Resolved 2026-11-10** (second-session experiment): the expectation was
+   wrong in one half — EF executes inserts via `ExecuteReader` (insert with
+   read-back), so the 57P01 command-level fault injection IS reachable on the
+   write path (observed: 2 of 8 command-fault events landed on inserts; the
+   other 6 on reads). Writes recover exactly like reads (all `POST /items`
+   succeeded through retried fault sequences; no write-path budget
+   exhaustion was directly captured, but the mechanism is identical to the
+   read path): recovery-or-exhaust, no caller-visible difference between
+   fault classes. The delta spec folds the write path into the data-endpoints
+   requirement with an item-creation scenario.
+   ~~Interceptor coverage / retry-semantics questions as originally framed.~~
+3. **Is the `customTestQuery` lambda redundant?** **Resolved 2026-11-10**
+   (code check): yes — `AddDbContextCheck`'s default test query already is
+   `(context, ct) => context.Database.CanConnectAsync(ct)`, so the explicit
+   lambda in `Program.cs` is decorative and kept only for explicitness. No
+   demo change made (documented here only).
 
 ## Smaller threads
 

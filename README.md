@@ -97,8 +97,12 @@ out of the box.
 - Health-check timings: average ~184ms, max ~1067ms (n=1; treat as
   observation, not contract).
 
-Full details and evidence: [`TAKEAWAYS.md`](TAKEAWAYS.md).
-Open questions queued for later evaluation: [`QUESTIONS.md`](QUESTIONS.md).
+Full details and evidence: [`TAKEAWAYS.md`](TAKEAWAYS.md)
+(second session, 2026-11-10, additionally verified the hard-down behavior —
+`/health` returning `503 Unhealthy` after ~194s when the database is stopped —
+and the write path: inserts execute via `ExecuteReader`, so SQLSTATE 57P01
+fault injection is reachable on writes, too).
+Open questions answered so far: [`QUESTIONS.md`](QUESTIONS.md).
 
 ## Status
 

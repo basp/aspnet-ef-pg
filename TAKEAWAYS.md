@@ -75,9 +75,53 @@ Configuration (Host/Program.cs):
   parameterizing them would make the demo easier to reason about and safer
   to run repeatedly.
 
-## Session end state (2026-11-10)
+## Session 2 (2026-11-10) — spec-apply experiments
 
-- Demo app stopped after the run-through (killed `dotnet run`/`Host.exe`).
+Second session, run while applying the `add-ef-connection-resiliency-spec`
+change (baseline re-confirmation plus the two scheduled experiments).
+
+**Reproduced from session 1:**
+- The thesis, cleanly: 20/20 `/health` responses `Healthy` under sustained
+  connection-fault injection, retry warnings in logs, zero 57P01 activity
+  anywhere near the probe path (still zero across both sessions on that
+  path).
+- One clean `/health` roll measured the true no-fault baseline: ~119ms.
+
+**Newly learned:**
+- **Backoff has jitter.** Retry delays are geometric with random jitter
+  (observed: 0, ~1s, ~3s, ~7.5s, then capped at 30s), not the plain
+  0, 1, 2, 4, 8 ladder earlier noted. The spec delta was revised accordingly
+  during this session's reconciliation.
+- **Hard-down path (previously unobserved).** With the database stopped,
+  `/health` returned **HTTP 503 Unhealthy after ~194s** — 10 escalating
+  capped retries plus ~7s per failed connection attempt
+  (`Health check FooContext with status Unhealthy completed after
+  193477ms`, message `(null)`). The retry-limit-exceeded failure is NOT
+  logged on the health-check path; only the retry warnings are. Recovery
+  after restarting the container was immediate (~120ms healthy).
+- **Writes ARE covered by command-level fault injection.** EF executes
+  inserts via `ExecuteReader` (insert with read-back), so the 57P01 fault is
+  reachable on `POST /items` — session 1's assumption (writes only connect
+  via non-reader paths) was wrong. Attribution across the session: 6 of 8
+  command-fault events on reads, 2 on inserts. All 8 POSTs still succeeded
+  through their faulted retry sequences (deep recovery examples: 1.1s and
+  11.9s POSTs).
+- Session-2 event totals (same caveat as always: raw log-line counts exceed
+  true event counts because exceptions are re-rendered by multiple loggers):
+  ~66 retry warnings, one read-path budget exhaustion (GET, ~177.7s wall to
+  `RetryLimitExceededException`), one unhealthy health-check completion
+  (the outage probe).
+
+Spec-facing consequences captured in the change
+`add-ef-connection-resiliency-spec`: hard-down scenario added, backoff
+requirement corrected, write path folded into the data-endpoints
+requirement (item-creation scenario added), and `QUESTIONS.md` items 1–3
+resolved via these experiments.
+
+## Session end state (2026-11-09 → 2026-11-10)
+
+- Demo app stopped after the run-through (killed `dotnet run`/`Host.exe`);
+  relaunched on 2026-11-10 for the spec-apply experiments above.
 - `some-postgres` Docker container still running on `localhost:5432`,
   credentials matching `appsettings.Development.json`; `Items` table intact,
   so the demo can be relaunched and re-verified without setup.
