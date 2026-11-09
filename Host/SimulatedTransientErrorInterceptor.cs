@@ -21,7 +21,7 @@ public class SimulatedTransientErrorInterceptor : DbCommandInterceptor
         CancellationToken cancellationToken = new())
     {
         var roll = Random.Shared.Next(100);
-        if (roll < 30)
+        if (roll < 50)
         {
             // Nothing happens - just pass through.
             return base.ReaderExecutingAsync(

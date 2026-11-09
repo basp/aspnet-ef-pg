@@ -8,6 +8,7 @@ var builder = WebApplication
 builder
     .Services
     .AddScoped<SimulatedTransientErrorInterceptor>()
+    .AddScoped<SimulatedConnectionFaultInterceptor>()
     .AddDbContext<FooContext>((sp, ef) =>
     {
         const string ConnectionStringName = "Foo";
@@ -18,7 +19,8 @@ builder
 
         IInterceptor[] interceptors =
         [
-            sp.GetRequiredService<SimulatedTransientErrorInterceptor>()
+            sp.GetRequiredService<SimulatedTransientErrorInterceptor>(),
+            sp.GetRequiredService<SimulatedConnectionFaultInterceptor>(),
         ];
 
         ef.UseNpgsql(
@@ -26,7 +28,7 @@ builder
             pg =>
             {
                 pg.EnableRetryOnFailure(
-                    maxRetryCount: 3,
+                    maxRetryCount: 10,
                     maxRetryDelay: TimeSpan.FromSeconds(30),
                     errorCodesToAdd: null);
             });
