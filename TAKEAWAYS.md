@@ -164,6 +164,45 @@ file); `some-postgres` container left running, `Items` table intact
 (14 items after the session's inserts). Same caveat as prior sessions: all
 rates/timings are n=1 observations, not contracts.
 
+## Session 4 (2026-11-10) — per-class fault rates (`per-class-fault-rates`)
+
+Implementation session for the `per-class-fault-rates` change: the shared
+`Demo:FaultInjection:RatePercent` was replaced by
+`Demo:FaultInjection:ConnectionRatePercent` (08001 class) and
+`Demo:FaultInjection:CommandRatePercent` (57P01 class), each defaulting to
+50 (session-3 notes above name the old shared key as it was then).
+
+**Reproduced from session 3 (defaults pass, both classes 50%):** the
+dual-50% profile bit for bit — probes chaining 57P01 non-query faults and
+08001 connection faults to `Healthy` recoveries, long dual-class chains
+(cumulative backoffs through the 30s cap) that outlasted the client's
+window, and no natural exhaustion landing in a bounded run (consistent with
+the ~4%-per-call odds, which make absence in a small sample unremarkable).
+
+**Newly learned (the two asymmetric passes):**
+
+- **Connection class disabled (0) / command class at 50%:** zero 08001
+  events across the whole pass while 57P01 continued on every reachable
+  command path — probe's `SELECT 1` (non-query), reads, and inserts
+  (`POST /items` 201). 62/64 probes Healthy, no budget stall; one probe's
+  57P01 chain outlasted the client's 90s window and was canceled
+  (bounded-run artifact, not exhaustion).
+- **Command class disabled (0) / connection class at 50%:** zero 57P01
+  events — reader and non-query alike — while 08001 continued; every
+  recovery chain contained connection faults only. 25/25 probes Healthy,
+  avg ~1.0s / max ~11.6s: per-attempt survival returned to the
+  single-class baseline (~50% per attempt, ~0.05% exhaustion) the
+  sessions 2–3 recorded, vs ~3.9s average under dual-50% in the same
+  session — the odds split cleanly along class lines, which is what the
+  change was for.
+- Boot-time validation stays per-class: out-of-range values fail at
+  startup naming the offending key (`ConnectionRatePercent=200` named
+  `Demo:FaultInjection:ConnectionRatePercent`; `CommandRatePercent=200`
+  named `Demo:FaultInjection:CommandRatePercent`).
+
+Same caveat as prior sessions: all counts/timings are bounded-run
+observations (n=1 session, statistical absence claims), not contracts.
+
 ## Session end state (2026-11-09 → 2026-11-10)
 
 - Demo app stopped after the run-through (killed `dotnet run`/`Host.exe`);

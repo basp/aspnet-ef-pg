@@ -36,9 +36,9 @@ failovers produce.
    jitter (capped), budget exhaustion manifests as a ~2-minute silent
    stall per request, and recovery after an outage is immediate.
 5. **The mechanism is now specified and tuned:** the demo exposes
-   configuration knobs (fault rate, retry count, delay cap) so the
-   behavior can be re-exercised and re-verified without recompiling, and
-   its seven durable behavior requirements are captured as a versioned
+   configuration knobs (per-class fault rates, retry count, delay cap) so
+   the behavior can be re-exercised and re-verified without recompiling,
+   and its six durable behavior requirements are captured as a versioned
    spec (`ef-connection-resiliency`) rather than tribal knowledge.
 
 ## Caveats

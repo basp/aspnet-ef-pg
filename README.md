@@ -33,8 +33,9 @@ observations, not contracts; full records in [`TAKEAWAYS.md`](TAKEAWAYS.md)):
   path too, since the `NonQueryExecutingAsync` override), so the demo
   exercises the exact transient-SQLSTATE machinery the retry strategy
   recognizes.
-- **Everything is tunable without recompiling** — fault rate, retry count,
-  delay cap — via configuration (see [Configuration](#configuration)).
+- **Everything is tunable without recompiling** — per-class fault rates,
+  retry count, delay cap — via configuration (see
+  [Configuration](#configuration)).
 
 ## How it works
 
@@ -65,16 +66,17 @@ observations, not contracts; full records in [`TAKEAWAYS.md`](TAKEAWAYS.md)):
 - **Fault injection** (`Host/SimulatedConnectionFaultInterceptor.cs` and
   `Host/SimulatedTransientErrorInterceptor.cs`): two scoped DI interceptors
   that throw real `PostgresException`s on a configurable fraction of
-  attempts (`Demo:FaultInjection:RatePercent`, default 50%), logged via
-  `ILogger` so every simulated fault is visible in the console (a rate of
-  `0` disables injection):
+  attempts, logged via `ILogger` so every simulated fault is visible in the
+  console (a class's rate of `0` disables that class only):
   - `ConnectionOpeningAsync` throws SQLSTATE `08001`
-    ("connection could not be established"),
+    ("connection could not be established"), at the connection class's rate
+    (`Demo:FaultInjection:ConnectionRatePercent`, default 50%),
   - `ReaderExecutingAsync` throws SQLSTATE `57P01` (`admin_shutdown`,
     simulated failover),
   - `NonQueryExecutingAsync` throws the same `57P01` on non-reader commands —
     which makes the EF health-check probe's `SELECT 1` faultable, so the
-    probe is exercised by both fault classes.
+    probe is exercised by both fault classes; the command class's rate is
+    `Demo:FaultInjection:CommandRatePercent` (default 50%).
 - **Resiliency**: `pg.EnableRetryOnFailure(maxRetryCount, maxRetryDelay)`
   on the Npgsql options, read from configuration (`Demo:Retry:MaxRetryCount`,
   default 10 — and `Demo:Retry:MaxRetryDelaySeconds`, default 30s); both
@@ -120,25 +122,26 @@ dbug: DefaultHealthCheckService                 Health check FooContext with sta
    | `/health`    | Health checks (the demonstration)                   |
    | `/items`     | `SELECT *` through EF (ordinary query path)        |
    | `POST /items`| Add one item (body: `{"name": "...", "description": "..."}`) |
-4. Watch the console: with the default 50% fault rate, requests and health
-   checks usually succeed through retried fault sequences (occasionally
-   spending their retry budget — see the session evidence), and EF's retry
-   activity ("A transient exception occurred... will be retried after
-   Xms") is visible in the logs.
+4. Watch the console: with the default 50% per-class fault rates, requests
+   and health checks usually succeed through retried fault sequences
+   (occasionally spending their retry budget — see the session evidence),
+   and EF's retry activity ("A transient exception occurred... will be
+   retried after Xms") is visible in the logs.
 
 ## Configuration
 
 The demo knobs live under a `Demo` section (defaults shown in
 `Host/appsettings.Development.json`; environment variables override, e.g.
-`Demo__FaultInjection__RatePercent`):
+`Demo__FaultInjection__ConnectionRatePercent`):
 
-| Key                                | Default | Meaning                                            |
-|------------------------------------|---------|----------------------------------------------------|
-| `Demo:FaultInjection:RatePercent`  | 50      | Fault probability per attempt (percent); `0` disables. |
-| `Demo:Retry:MaxRetryCount`         | 10      | EF retry budget per operation.                     |
-| `Demo:Retry:MaxRetryDelaySeconds`  | 30      | Cap for each geometric-with-jitter retry delay.    |
+| Key                                     | Default | Meaning                                            |
+|-----------------------------------------|---------|----------------------------------------------------|
+| `Demo:FaultInjection:ConnectionRatePercent` | 50  | Connection-class (08001) fault probability per attempt (percent); `0` disables the connection class only. |
+| `Demo:FaultInjection:CommandRatePercent`    | 50  | Command-class (57P01) fault probability per attempt (percent); `0` disables the command class only. |
+| `Demo:Retry:MaxRetryCount`              | 10      | EF retry budget per operation.                     |
+| `Demo:Retry:MaxRetryDelaySeconds`       | 30      | Cap for each geometric-with-jitter retry delay.    |
 
-Missing keys fall back to those defaults; out-of-range values (rate outside
+Missing keys fall back to those defaults; out-of-range values (rates outside
 0–100, negative retry settings) fail at startup with the offending key
 named. Knobs are read once at startup — restart to apply a change.
 
@@ -184,6 +187,16 @@ exhaustion to a visible ~4% per call at the default 50% rate — so the
 healthy-when-retried finding now stands alongside an honest
 occasionally-unhealthy flip side.
 
+**Session 4 (2026-11-10, `per-class-fault-rates` change):** the shared
+fault rate became two per-class rates (`Demo:FaultInjection:ConnectionRatePercent`
+/ `CommandRatePercent`, each defaulting to 50 — defaults preserve every
+session-3 observation). Both asymmetric passes verified: connection class
+disabled silenced 08001 entirely while 57P01 continued on probe, read, and
+write paths; command class disabled silenced 57P01 (reader and non-query
+alike) and returned probe per-attempt survival to the single-class
+baseline (avg ~1s vs ~3.9s under dual-50%, recovery chains connection
+faults only).
+
 Full details and evidence: [`TAKEAWAYS.md`](TAKEAWAYS.md).
 Open questions answered so far: [`QUESTIONS.md`](QUESTIONS.md).
 
@@ -195,14 +208,16 @@ Open questions answered so far: [`QUESTIONS.md`](QUESTIONS.md).
   on 2026-11-10 (manual verification only — automated tests become relevant
   if this idea is incorporated into a real codebase).
 - The change `parameterize-fault-injection` (probe-path symmetry +
-  configuration knobs) is fully implemented and verified in-session,
-  awaiting archive; when archived, the spec's probe requirement is
-  replaced to reflect the symmetric probe.
-- Remaining improvement candidates, captured for a future change:
-  per-fault-class rates (separate connection vs command percentages —
-  would restore the probe's original per-attempt survival odds while
-  keeping symmetry) and cosmetic deduplication of the interceptors'
-  roll-and-throw shape.
+  configuration knobs) is implemented, verified in-session, and archived
+  (2026-11-10); the spec now covers the symmetric probe and the
+  configuration knobs — 6 requirements in total.
+- The change `per-class-fault-rates` (separate connection- vs command-class
+  fault rates) is implemented, verified in-session, and archived
+  (2026-11-10); the spec now covers the per-class rate configurability and
+  the per-class disabled-injection wording — still 6 requirements in total.
+- Remaining candidate, captured for a future change: cosmetic
+  deduplication of the interceptors' roll-and-throw shape (no behavior
+  change expected — would be a skip-specs change).
 - Framework version pairing: the host targets `net11.0` (RC SDK) while the
   EF Core and Npgsql provider packages are 10.x stable; noted here as the
   current representative pairing (see [`QUESTIONS.md`](QUESTIONS.md)).

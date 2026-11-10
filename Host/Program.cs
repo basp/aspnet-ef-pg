@@ -9,7 +9,11 @@ var builder = WebApplication
 // out-of-range entries rather than surfacing them on the first request.
 _ = builder
     .Configuration
-    .FaultInjectionRatePercent();
+    .ConnectionRatePercent();
+
+_ = builder
+    .Configuration
+    .CommandRatePercent();
 
 _ = builder
     .Configuration

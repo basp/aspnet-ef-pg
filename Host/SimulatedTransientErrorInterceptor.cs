@@ -13,7 +13,7 @@ public class SimulatedTransientErrorInterceptor : DbCommandInterceptor
         ILogger<SimulatedTransientErrorInterceptor> logger,
         IConfiguration configuration)
     {
-        this.ratePercent = configuration.FaultInjectionRatePercent();
+        this.ratePercent = configuration.CommandRatePercent();
         this.logger = logger;
     }
 

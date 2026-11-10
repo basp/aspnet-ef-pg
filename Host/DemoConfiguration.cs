@@ -4,11 +4,21 @@ namespace Host;
 
 public static class DemoConfiguration
 {
-    public static int FaultInjectionRatePercent(
+    public static int ConnectionRatePercent(
         this IConfiguration configuration)
     {
         return configuration.ReadInt(
-            "Demo:FaultInjection:RatePercent",
+            "Demo:FaultInjection:ConnectionRatePercent",
+            fallback: 50,
+            min: 0,
+            max: 100);
+    }
+
+    public static int CommandRatePercent(
+        this IConfiguration configuration)
+    {
+        return configuration.ReadInt(
+            "Demo:FaultInjection:CommandRatePercent",
             fallback: 50,
             min: 0,
             max: 100);

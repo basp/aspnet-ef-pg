@@ -13,7 +13,7 @@ public class SimulatedConnectionFaultInterceptor : DbConnectionInterceptor
         ILogger<SimulatedConnectionFaultInterceptor> logger,
         IConfiguration configuration)
     {
-        this.ratePercent = configuration.FaultInjectionRatePercent();
+        this.ratePercent = configuration.ConnectionRatePercent();
         this.logger = logger;
     }
 

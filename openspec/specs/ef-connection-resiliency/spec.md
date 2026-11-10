@@ -51,7 +51,7 @@ activity reaches.
 
 #### Scenario: No simulated faults while injection is disabled
 
-- **GIVEN** the fault injection rate is configured to 0
+- **GIVEN** the rates of both fault classes are configured to 0
 - **WHEN** `/health`, `/items`, and `POST /items` are requested repeatedly
 - **THEN** no simulated fault events appear in the application log and no operation's timing is prolonged by retries
 
@@ -113,27 +113,36 @@ its entire retry budget, rather than hanging indefinitely or failing early.
 
 ### Requirement: Fault injection rate and resiliency settings are configurable
 
-The demonstration SHALL take its fault-injection rate, maximum retry count,
-and maximum retry delay from configuration, with defaults equal to the
-previously hardcoded demonstration configuration (50% fault rate, 10
-retries, 30-second delay cap); a configured rate of 0 SHALL disable fault
-injection. Changing these values SHALL scale the demonstrated behavior
-exactly as the corresponding fixed values do.
+The demonstration SHALL take its fault-injection rates per fault class — a
+connection-class rate governing the 08001 injector and a command-class rate
+governing the 57P01 injector — and its resiliency settings (maximum retry
+count, maximum retry delay) from configuration, with per-class rate
+defaults each equal to the previously demonstrated 50% shared rate and
+retry defaults equal to the previously fixed values (10 retries, 30-second
+delay cap); a configured rate of 0 SHALL disable its own fault class only.
+Changing any of these values SHALL scale the demonstrated behavior exactly
+as the corresponding fixed values do.
 
 #### Scenario: Defaults preserve the demonstrated configuration
 
-- **GIVEN** the configuration keys for the fault rate and retry settings are absent
+- **GIVEN** the configuration keys for the per-class fault rates and retry settings are absent
 - **WHEN** the demo runs and exercises `/health` and the data endpoints
-- **THEN** fault injection is active at 50% and the retry behavior matches the previously fixed settings (10 retries, 30-second delay cap)
+- **THEN** both fault classes are active at 50% (per-attempt behaviors match the previously verified shared-rate session) and the retry behavior matches the previously fixed settings (10 retries, 30-second delay cap)
 
 #### Scenario: Configured rate adjusts observed fault frequency
 
-- **GIVEN** a fault rate other than 50% is configured
+- **GIVEN** a fault-class rate other than 50% is configured for one class while the other class's rate is unchanged
 - **WHEN** the endpoints are exercised repeatedly
-- **THEN** simulated fault events occur on approximately the configured fraction of attempts (inherited randomness), and each faulted-but-retried operation behaves identically to its counterpart under any other rate
+- **THEN** simulated fault events of the configured class occur on approximately its configured fraction of attempts (inherited randomness), the untouched class displays its own configured frequency, and each faulted-but-retried operation behaves identically to its counterpart under any other rate combination
 
 #### Scenario: Configured retry settings reshape the budget
 
 - **GIVEN** a maximum retry count or maximum retry delay other than the default is configured
 - **WHEN** an operation exhausts the retry budget or times out
 - **THEN** the number of retry warnings and the delay cap visible in the application log match the configured values (per the existing geometric-backoff requirement)
+
+#### Scenario: Rates gate behavior asymmetrically
+
+- **GIVEN** one fault-class rate is configured to 0 with the other class active
+- **WHEN** `/health`, `/items`, and `POST /items` are exercised
+- **THEN** no simulated fault events of the disabled class appear anywhere in the application log, while the active class's events continue on their reachable paths (connection faults at connection opens; command faults on reader and non-query commands alike), and each request responds only per the remaining class's fault activity — recovering when a retry succeeds, failing late on budget exhaustion
