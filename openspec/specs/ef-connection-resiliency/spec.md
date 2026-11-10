@@ -33,20 +33,34 @@ warning in the application log.
 - **THEN** the health check reports unhealthy and the endpoint responds with a failing status (HTTP 503 in the demo API)
 - **AND** the application log records the transient retry warnings for the exhausted attempts, with the retry-limit-exceeded failure carried by the unhealthy health-check result rather than logged as a separate error line
 
-### Requirement: Health-check probe exercises only connection-level fault injection
+### Requirement: Health-check probe exercises both fault classes
 
-The health-check probe path (`CanConnectAsync`) executes its test query as a
-non-reader command, so in the demo as built, command-level fault injection
-(57P01) SHALL NOT apply to the health-check path; only connection-level
-fault injection (08001) can affect it. The health-check capability does not
-cover command-level transient faults by construct of this demo.
+The health-check probe path (`CanConnectAsync` executes its test query as a
+non-query command) SHALL be subject to both simulated fault classes:
+connection-level fault injection (SQLSTATE 08001) when the probe opens its
+connection, and command-level fault injection (SQLSTATE 57P01) when the
+probe's test query executes, as far as each class's configured fault
+activity reaches.
 
-#### Scenario: Health checks produce no command-fault activity
+#### Scenario: Probe faults and recovers under command-level injection
 
-- **GIVEN** both fault-injection interceptors are registered and active
-- **WHEN** `/health` is requested repeatedly
-- **THEN** fault activity observed on the health-check path consists of connection faults (08001) only
-- **AND** no command-level fault events (57P01) occur in connection with health-check probe executions
+- **GIVEN** both fault-injection interceptors are registered with active fault injection
+- **WHEN** `/health` is requested repeatedly and the probe's test query encounters an injected 57P01 command fault
+- **THEN** the combined health status is healthy on responses whose probe faulted and was subsequently retried
+- **AND** the application log contains simulated command-fault events attributed to health-check probe executions, followed by transient-exception retry warnings
+
+#### Scenario: No simulated faults while injection is disabled
+
+- **GIVEN** the fault injection rate is configured to 0
+- **WHEN** `/health`, `/items`, and `POST /items` are requested repeatedly
+- **THEN** no simulated fault events appear in the application log and no operation's timing is prolonged by retries
+
+#### Scenario: Probe retry-budget exhaustion under sustained dual-class injection
+
+- **GIVEN** both fault classes are active with each class's configured rate, so each probe attempt is independently subject to connection- and command-level faults (at the default demonstration configuration: 50% each, making a fully faulted attempt sequence materially possible)
+- **WHEN** every attempt of the probe's retry budget encounters injected faults at either or both levels
+- **THEN** the health check reports unhealthy and the endpoint responds with a failing status (HTTP 503 in the demo API), with wall time equal to the sum of capped retry delays plus per-attempt fault durations
+- **AND** the application log records the transient retry warnings for the exhausted attempts, with the retry-limit-exceeded failure carried by the unhealthy health-check result rather than logged as a separate error line
 
 ### Requirement: Data endpoints recover from transient faults invisibly to callers
 
@@ -96,3 +110,30 @@ its entire retry budget, rather than hanging indefinitely or failing early.
 - **WHEN** the retry budget (10 retries under the configured settings) is spent
 - **THEN** the affected request ultimately fails with a retry-limit-exceeded error response (HTTP 500 in the demo API) after wall time equal to the sum of capped retry delays plus per-attempt fault duration
 - **AND** the application log records that the maximum number of retries was exceeded
+
+### Requirement: Fault injection rate and resiliency settings are configurable
+
+The demonstration SHALL take its fault-injection rate, maximum retry count,
+and maximum retry delay from configuration, with defaults equal to the
+previously hardcoded demonstration configuration (50% fault rate, 10
+retries, 30-second delay cap); a configured rate of 0 SHALL disable fault
+injection. Changing these values SHALL scale the demonstrated behavior
+exactly as the corresponding fixed values do.
+
+#### Scenario: Defaults preserve the demonstrated configuration
+
+- **GIVEN** the configuration keys for the fault rate and retry settings are absent
+- **WHEN** the demo runs and exercises `/health` and the data endpoints
+- **THEN** fault injection is active at 50% and the retry behavior matches the previously fixed settings (10 retries, 30-second delay cap)
+
+#### Scenario: Configured rate adjusts observed fault frequency
+
+- **GIVEN** a fault rate other than 50% is configured
+- **WHEN** the endpoints are exercised repeatedly
+- **THEN** simulated fault events occur on approximately the configured fraction of attempts (inherited randomness), and each faulted-but-retried operation behaves identically to its counterpart under any other rate
+
+#### Scenario: Configured retry settings reshape the budget
+
+- **GIVEN** a maximum retry count or maximum retry delay other than the default is configured
+- **WHEN** an operation exhausts the retry budget or times out
+- **THEN** the number of retry warnings and the delay cap visible in the application log match the configured values (per the existing geometric-backoff requirement)

@@ -1,13 +1,40 @@
 # Sandbox
 
-Just a small playground to demonstrate ideas, problems and other fun stuff.
+A small playground that exists to answer one specific question:
 
-Currently it demonstrates the ASP.NET health check framework and EF connection
-resiliency in a very narrow context: whether `EnableRetryOnFailure` on the
-PostgreSQL EF provider also covers Entity Framework `DbContext` health checks
-(`AddDbContextCheck`). It doubles as a learning project for setting up a
-minimal ASP.NET API with EF Core — a feel for what .NET, ASP.NET and EF offer
-out of the box.
+> **Does `EnableRetryOnFailure` on the PostgreSQL EF provider also cover the
+> Entity Framework `DbContext` health check (`AddDbContextCheck`)?**
+
+It matters in real deployments: `EnableRetryOnFailure` is enabled for
+application queries, and then a Kubernetes liveness-style `/health` probe is
+trusted to be resiliency-aware — without anyone checking whether the probe
+actually gets the same retried safety net. This demo makes that assumption
+testable — and, alongside it, pokes at what else the combination does under
+sustained faults, hard outages, and budget exhaustion.
+
+It doubles as a learning project for setting up a minimal ASP.NET API with
+EF Core — a feel for what .NET, ASP.NET and EF offer out of the box.
+
+## The headline findings
+
+All evidence is from manual demo sessions (small samples — treat numbers as
+observations, not contracts; full records in [`TAKEAWAYS.md`](TAKEAWAYS.md)):
+
+- **The thesis holds.** `/health` stayed `Healthy` under sustained transient
+  connection faults (21/21 and 20/20 responses across two sessions) — the
+  retry strategy wraps the health-check probe just like any other query.
+- **Hard-down is a long stall, not a fast failure.** With the database
+  stopped, `/health` returned `503 Unhealthy` after ~194s. Client-side
+  HTTP timeouts (typically 100–120s) expire *before* the server's retry
+  budget is spent — and cancelling the HTTP request does not cancel the
+  server-side retry ladder.
+- **Faults are simulated with real `PostgresException`s at EF hook level**
+  (08001 connection faults, 57P01 `admin_shutdown` failovers — on the probe
+  path too, since the `NonQueryExecutingAsync` override), so the demo
+  exercises the exact transient-SQLSTATE machinery the retry strategy
+  recognizes.
+- **Everything is tunable without recompiling** — fault rate, retry count,
+  delay cap — via configuration (see [Configuration](#configuration)).
 
 ## How it works
 
@@ -23,7 +50,7 @@ out of the box.
          |                                     |
          |  DbContext: FooContext              |
          |   - UseNpgsql(...)                  |
-         |   - EnableRetryOnFailure(10, 30s)   |
+         |   - EnableRetryOnFailure(Demo:Retry)|
          |   - + 2 fault-injection interceptors|
          |                                     |
          |  Health checks:                     |
@@ -56,6 +83,19 @@ out of the box.
   `CanConnectAsync` test query so the probe travels the same connection and
   command pipeline as normal queries.
 
+What a single probe looks like in the console when both classes inject —
+fault, retry, fault again, retry, recover (log lines trimmed, timings
+verbatim from a session-3 run):
+
+```
+dbug: Host.SimulatedTransientErrorInterceptor   Simulating transient error (non-query).
+info: ... transient exception ... will be retried after 0ms.
+dbug: Host.SimulatedConnectionFaultInterceptor  Simulating connection fault.
+info: ... transient exception ... will be retried after 1071ms.
+dbug: DefaultHealthCheckService                 Health check FooContext with status Healthy
+                                                completed after 1672.3672ms
+```
+
 ## How to run
 
 1. Provide PostgreSQL on `localhost:5432` with username `postgres`,
@@ -80,11 +120,11 @@ out of the box.
    | `/health`    | Health checks (the demonstration)                   |
    | `/items`     | `SELECT *` through EF (ordinary query path)        |
    | `POST /items`| Add one item (body: `{"name": "...", "description": "..."}`) |
-4. Watch the console: despite the 50% injected fault rate, requests and
-   health checks keep succeeding apart from occasional retry-budget
-   exhaustions, and EF's retry activity
-   ("A transient exception occurred... will be retried after Xms") is
-   visible in the logs.
+4. Watch the console: with the default 50% fault rate, requests and health
+   checks usually succeed through retried fault sequences (occasionally
+   spending their retry budget — see the session evidence), and EF's retry
+   activity ("A transient exception occurred... will be retried after
+   Xms") is visible in the logs.
 
 ## Configuration
 
@@ -102,36 +142,49 @@ Missing keys fall back to those defaults; out-of-range values (rate outside
 0–100, negative retry settings) fail at startup with the offending key
 named. Knobs are read once at startup — restart to apply a change.
 
-## What we observed (single session, 2026-11-09)
+## What the sessions observed
+
+Session records in chronological order; statements are scoped to the build
+they ran against (the demo evolves — session 2 corrected session 1's
+backoff reading, session 3 made the probe faultable by both fault classes).
+
+**Session 1 (2026-11-09):**
 
 - `/health` returned `Healthy` 21/21 under sustained transient connection
   faults. Log evidence shows `NpgsqlRetryingExecutionStrategy` wrapping the
   health-check probe (`CanConnectAsync` → `NpgsqlDatabaseCreator.ExistsAsync`):
   the **demonstrated thesis holds** — `EnableRetryOnFailure` covers
   `AddDbContextCheck`.
-- **Probe-path subtlety**: the health-check probe runs `SELECT 1` as
-  `ExecuteNonQuery`, and the command fault injector only overrides
-  `ReaderExecutingAsync` — so SQLSTATE 57P01 faults cannot reach the
-  health-check path; only connection-level (08001) faults are exercised there.
-  *(2026-11-10 note, change `parameterize-fault-injection`: the injector now
-  also overrides `NonQueryExecutingAsync`, so 57P01 faults DO reach the
-  probe in the current build; this paragraph describes runs against the
-  earlier build.)*
-- The retry ladder is exponential (0, 1, 2, 4, 8, 16, 30, ... seconds, capped
-  at `maxRetryDelay`), totalling ~121s across 10 retries.
-- Retry-budget exhaustion is rare under this fault rate but was observed a
-  few times: ~2 minutes of silent stall, then `RetryLimitExceededException`
-  surfaces as a 500. Client HTTP timeouts (typically ~100–120s) expire
-  before the server's retry budget is spent — and cancelling the HTTP
-  request does not cancel the server-side retry ladder.
+- **Probe-path subtlety**: at the time, the command fault injector only
+  overrode `ReaderExecutingAsync`, so 57P01 faults could not reach the
+  health-check path; only connection-level (08001) faults were exercised
+  there.
+- The retry ladder was read as exponential (0, 1, 2, 4, 8, 16, 30, ...
+  seconds, capped at `maxRetryDelay`), totalling ~121s across 10 retries.
+- Retry-budget exhaustion was observed a few times: ~2 minutes of silent
+  stall, then `RetryLimitExceededException` surfaces as a 500.
 - Health-check timings: average ~184ms, max ~1067ms (n=1; treat as
   observation, not contract).
 
-Full details and evidence: [`TAKEAWAYS.md`](TAKEAWAYS.md)
-(second session, 2026-11-10, additionally verified the hard-down behavior —
-`/health` returning `503 Unhealthy` after ~194s when the database is stopped —
-and the write path: inserts execute via `ExecuteReader`, so SQLSTATE 57P01
-fault injection is reachable on writes, too).
+**Session 2 (2026-11-10, `add-ef-connection-resiliency-spec` change):**
+reproduced the thesis (20/20 `Healthy`); corrected the backoff reading —
+delays grow **geometrically with jitter** (observed 0, ~1s, ~3s, ~7.5s, then
+capped at 30s), not as the plain 0/1/2/4/8 ladder noted above; verified the
+hard-down path (`503 Unhealthy` after ~194s when the database is stopped);
+and proved the write path executes inserts via `ExecuteReader`, so 57P01
+fault injection is reachable on writes, too. Captured as the project's
+first archived OpenSpec spec.
+
+**Session 3 (2026-11-10, `parameterize-fault-injection` change):** knobs
+verified (disabled pass: zero faults; small-budget pass: delays capped at
+the configured 1s with ≤2 warnings per operation); the probe now chains
+57P01 non-query faults *and* 08001 connection faults to a `Healthy`
+recovery; and dual-class interception raises `/health` retry-budget
+exhaustion to a visible ~4% per call at the default 50% rate — so the
+healthy-when-retried finding now stands alongside an honest
+occasionally-unhealthy flip side.
+
+Full details and evidence: [`TAKEAWAYS.md`](TAKEAWAYS.md).
 Open questions answered so far: [`QUESTIONS.md`](QUESTIONS.md).
 
 ## Status
@@ -141,11 +194,15 @@ Open questions answered so far: [`QUESTIONS.md`](QUESTIONS.md).
   applied and archived as the change `add-ef-connection-resiliency-spec`
   on 2026-11-10 (manual verification only — automated tests become relevant
   if this idea is incorporated into a real codebase).
-- Candidate improvements are captured but deliberately not implemented yet:
-  make fault injection reachable on the health-check probe (adding a
-  `NonQueryExecutingAsync` override would require a spec delta, since the
-  current spec pins the probe path to connection-level faults by construct),
-  and parameterizing the fault rate and retry settings.
+- The change `parameterize-fault-injection` (probe-path symmetry +
+  configuration knobs) is fully implemented and verified in-session,
+  awaiting archive; when archived, the spec's probe requirement is
+  replaced to reflect the symmetric probe.
+- Remaining improvement candidates, captured for a future change:
+  per-fault-class rates (separate connection vs command percentages —
+  would restore the probe's original per-attempt survival odds while
+  keeping symmetry) and cosmetic deduplication of the interceptors'
+  roll-and-throw shape.
 - Framework version pairing: the host targets `net11.0` (RC SDK) while the
   EF Core and Npgsql provider packages are 10.x stable; noted here as the
   current representative pairing (see [`QUESTIONS.md`](QUESTIONS.md)).
