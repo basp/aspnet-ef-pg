@@ -50,6 +50,13 @@ activity reaches.
 - **WHEN** `/health`, `/items`, and `POST /items` are requested repeatedly
 - **THEN** no simulated fault events appear in the application log and no operation's timing is prolonged by retries
 
+#### Scenario: Probe retry-budget exhaustion under sustained dual-class injection
+
+- **GIVEN** both fault classes are active with each class's configured rate, so each probe attempt is independently subject to connection- and command-level faults (at the default demonstration configuration: 50% each, making a fully faulted attempt sequence materially possible)
+- **WHEN** every attempt of the probe's retry budget encounters injected faults at either or both levels
+- **THEN** the health check reports unhealthy and the endpoint responds with a failing status (HTTP 503 in the demo API), with wall time equal to the sum of capped retry delays plus per-attempt fault durations
+- **AND** the application log records the transient retry warnings for the exhausted attempts, with the retry-limit-exceeded failure carried by the unhealthy health-check result rather than logged as a separate error line
+
 ### Requirement: Fault injection rate and resiliency settings are configurable
 
 The demonstration SHALL take its fault-injection rate, maximum retry count,

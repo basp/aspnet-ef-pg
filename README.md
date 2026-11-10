@@ -37,14 +37,21 @@ out of the box.
 
 - **Fault injection** (`Host/SimulatedConnectionFaultInterceptor.cs` and
   `Host/SimulatedTransientErrorInterceptor.cs`): two scoped DI interceptors
-  that throw real `PostgresException`s on 50% of attempts, logged via
-  `ILogger` so every simulated fault is visible in the console:
+  that throw real `PostgresException`s on a configurable fraction of
+  attempts (`Demo:FaultInjection:RatePercent`, default 50%), logged via
+  `ILogger` so every simulated fault is visible in the console (a rate of
+  `0` disables injection):
   - `ConnectionOpeningAsync` throws SQLSTATE `08001`
     ("connection could not be established"),
   - `ReaderExecutingAsync` throws SQLSTATE `57P01` (`admin_shutdown`,
-    simulated failover).
-- **Resiliency**: `pg.EnableRetryOnFailure(maxRetryCount: 10, maxRetryDelay: 30s)`
-  on the Npgsql options; both SQLSTATEs are transient per Npgsql.
+    simulated failover),
+  - `NonQueryExecutingAsync` throws the same `57P01` on non-reader commands —
+    which makes the EF health-check probe's `SELECT 1` faultable, so the
+    probe is exercised by both fault classes.
+- **Resiliency**: `pg.EnableRetryOnFailure(maxRetryCount, maxRetryDelay)`
+  on the Npgsql options, read from configuration (`Demo:Retry:MaxRetryCount`,
+  default 10 — and `Demo:Retry:MaxRetryDelaySeconds`, default 30s); both
+  SQLSTATEs are transient per Npgsql.
 - **Health checks**: `/health` registers the EF `DbContext` check with a
   `CanConnectAsync` test query so the probe travels the same connection and
   command pipeline as normal queries.
@@ -74,9 +81,26 @@ out of the box.
    | `/items`     | `SELECT *` through EF (ordinary query path)        |
    | `POST /items`| Add one item (body: `{"name": "...", "description": "..."}`) |
 4. Watch the console: despite the 50% injected fault rate, requests and
-   health checks keep succeeding, and EF's retry activity
+   health checks keep succeeding apart from occasional retry-budget
+   exhaustions, and EF's retry activity
    ("A transient exception occurred... will be retried after Xms") is
    visible in the logs.
+
+## Configuration
+
+The demo knobs live under a `Demo` section (defaults shown in
+`Host/appsettings.Development.json`; environment variables override, e.g.
+`Demo__FaultInjection__RatePercent`):
+
+| Key                                | Default | Meaning                                            |
+|------------------------------------|---------|----------------------------------------------------|
+| `Demo:FaultInjection:RatePercent`  | 50      | Fault probability per attempt (percent); `0` disables. |
+| `Demo:Retry:MaxRetryCount`         | 10      | EF retry budget per operation.                     |
+| `Demo:Retry:MaxRetryDelaySeconds`  | 30      | Cap for each geometric-with-jitter retry delay.    |
+
+Missing keys fall back to those defaults; out-of-range values (rate outside
+0–100, negative retry settings) fail at startup with the offending key
+named. Knobs are read once at startup — restart to apply a change.
 
 ## What we observed (single session, 2026-11-09)
 
@@ -89,6 +113,10 @@ out of the box.
   `ExecuteNonQuery`, and the command fault injector only overrides
   `ReaderExecutingAsync` — so SQLSTATE 57P01 faults cannot reach the
   health-check path; only connection-level (08001) faults are exercised there.
+  *(2026-11-10 note, change `parameterize-fault-injection`: the injector now
+  also overrides `NonQueryExecutingAsync`, so 57P01 faults DO reach the
+  probe in the current build; this paragraph describes runs against the
+  earlier build.)*
 - The retry ladder is exponential (0, 1, 2, 4, 8, 16, 30, ... seconds, capped
   at `maxRetryDelay`), totalling ~121s across 10 retries.
 - Retry-budget exhaustion is rare under this fault rate but was observed a

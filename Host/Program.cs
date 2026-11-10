@@ -5,6 +5,20 @@ using Microsoft.EntityFrameworkCore.Diagnostics;
 var builder = WebApplication
     .CreateBuilder(args);
 
+// Eagerly validate the demo configuration values so boot fails fast on
+// out-of-range entries rather than surfacing them on the first request.
+_ = builder
+    .Configuration
+    .FaultInjectionRatePercent();
+
+_ = builder
+    .Configuration
+    .RetryMaxRetryCount();
+
+_ = builder
+    .Configuration
+    .RetryMaxRetryDelaySeconds();
+
 builder
     .Services
     .AddScoped<SimulatedTransientErrorInterceptor>()
@@ -28,8 +42,13 @@ builder
             pg =>
             {
                 pg.EnableRetryOnFailure(
-                    maxRetryCount: 10,
-                    maxRetryDelay: TimeSpan.FromSeconds(30),
+                    maxRetryCount: builder
+                        .Configuration
+                        .RetryMaxRetryCount(),
+                    maxRetryDelay: TimeSpan.FromSeconds(
+                        builder
+                            .Configuration
+                            .RetryMaxRetryDelaySeconds()),
                     errorCodesToAdd: null);
             });
         

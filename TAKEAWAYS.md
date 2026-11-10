@@ -118,6 +118,52 @@ requirement corrected, write path folded into the data-endpoints
 requirement (item-creation scenario added), and `QUESTIONS.md` items 1–3
 resolved via these experiments.
 
+## Session 3 (2026-11-10) — probe symmetry + knobs (`parameterize-fault-injection`)
+
+Implementation session for the `parameterize-fault-injection` change,
+verifying the knobs (`Demo:FaultInjection:RatePercent`,
+`Demo:Retry:MaxRetryCount`, `Demo:Retry:MaxRetryDelaySeconds`) and the new
+`NonQueryExecutingAsync` command-fault override.
+
+**Reproduced from sessions 1–2:** recovery-or-exhaust on all endpoints,
+geometric-with-jitter capped backoff (one defaults pass request walked the
+full ladder 1s→3s→7.5s→16s→30s→30s to a `Healthy` completion in 87.9s), and
+client patience expiring server-side retries (a 117.2s GET completes after
+the client's 120s timeout had nearly elapsed; killing the demo mid-ladder
+also showed a request retrying long after its caller gave up).
+
+**Newly learned:**
+
+- **Probe symmetry reached.** First faulted probe run chained
+  `SELECT 1` (ExecuteNonQuery) → non-query fault (57P01) → retry after 0ms →
+  connection fault (08001) → retry after 1071ms → `Healthy` completion
+  (1672ms). Both fault classes are now visibly active on the probe path.
+- **Dual-class interception reshapes `/health` failure odds.** With both
+  classes at 50%, each probe attempt survives only if both dice pass
+  (~25%), so probe retry-budget exhaustion rises from ~0.05% to ~4% per
+  call and surfaced as 3 `Unhealthy` (503) among the first batch's
+  health completions — consistent with the delta spec's
+  exhaustion-under-dual-class scenario added during reconciliation. The
+  retry-limit-exceeded failure was again NOT logged on the health-check
+  path (0 mentions while unhealthy completions occurred).
+- **Knobs reshape the budget exactly as configured.** Disabled pass
+  (`RatePercent: 0`): zero simulated faults, zero retry warnings, all
+  requests sub-120ms. Small-budget pass (`MaxRetryCount: 2`,
+  `MaxRetryDelaySeconds: 1`): every logged delay exactly `0ms, 1000ms`
+  (≤2 warnings per operation), failures at ~1010–1020ms instead of
+  minutes-long stalls (8 unhealthy / 6 healthy of 14 completions).
+- Out-of-range control values fail at startup with the offending key named
+  (throwaway run with `RatePercent: 300`).
+- Defaults-run totals (single session, log-line counts exaggerated by
+  multi-logger exception re-rendering): 72 retry warnings, 16 non-query
+  / 50 connection / 7 reader fault events, data endpoints recovering
+  (3/3 POSTs within 130ms; 3/3 GETs slow but 200).
+
+Demo stopped after the verification passes (defaults restored via config
+file); `some-postgres` container left running, `Items` table intact
+(14 items after the session's inserts). Same caveat as prior sessions: all
+rates/timings are n=1 observations, not contracts.
+
 ## Session end state (2026-11-09 → 2026-11-10)
 
 - Demo app stopped after the run-through (killed `dotnet run`/`Host.exe`);
