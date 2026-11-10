@@ -35,7 +35,9 @@ observations, not contracts; full records in [`TAKEAWAYS.md`](TAKEAWAYS.md)):
   recognizes.
 - **Everything is tunable without recompiling** — per-class fault rates,
   retry count, delay cap — via configuration (see
-  [Configuration](#configuration)).
+  [Configuration](#configuration)). Verified per class: disabling either
+  class silences only its own SQLSTATE and restores the probe's original
+  single-class survival odds.
 
 ## How it works
 
@@ -216,8 +218,8 @@ Open questions answered so far: [`QUESTIONS.md`](QUESTIONS.md).
   (2026-11-10); the spec now covers the per-class rate configurability and
   the per-class disabled-injection wording — still 6 requirements in total.
 - Remaining candidate, captured for a future change: cosmetic
-  deduplication of the interceptors' roll-and-throw shape (no behavior
-  change expected — would be a skip-specs change).
+  deduplication of the interceptors' roll-and-throw shape (cosmetic only —
+  no behavior change, so the spec stays untouched).
 - Framework version pairing: the host targets `net11.0` (RC SDK) while the
   EF Core and Npgsql provider packages are 10.x stable; noted here as the
   current representative pairing (see [`QUESTIONS.md`](QUESTIONS.md)).

@@ -113,15 +113,13 @@ its entire retry budget, rather than hanging indefinitely or failing early.
 
 ### Requirement: Fault injection rate and resiliency settings are configurable
 
-The demonstration SHALL take its fault-injection rates per fault class — a
-connection-class rate governing the 08001 injector and a command-class rate
-governing the 57P01 injector — and its resiliency settings (maximum retry
-count, maximum retry delay) from configuration, with per-class rate
-defaults each equal to the previously demonstrated 50% shared rate and
-retry defaults equal to the previously fixed values (10 retries, 30-second
-delay cap); a configured rate of 0 SHALL disable its own fault class only.
-Changing any of these values SHALL scale the demonstrated behavior exactly
-as the corresponding fixed values do.
+The demonstration SHALL take its fault-injection rates per fault class (a
+connection-class rate for the 08001 injector, a command-class rate for the
+57P01 injector) and its resiliency settings (maximum retry count, maximum
+retry delay) from configuration; a rate of 0 SHALL disable its own fault
+class only. Defaults SHALL preserve the previously demonstrated
+configuration, and configured changes SHALL scale the demonstrated
+behavior as the fixed values do.
 
 #### Scenario: Defaults preserve the demonstrated configuration
 
